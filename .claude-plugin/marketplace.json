@@ -1,5 +1,14 @@
 {
   "name": "redakciya",
-  "owner": {"name": "AndreyZhukovRu"},
-  "plugins": [{"name": "redakciya", "source": "./", "description": "Навык «Редакция» — новости и публикация в соцсети"}]
+  "owner": {
+    "name": "AndreyZhukovRu"
+  },
+  "description": "Навык «Редакция»: новости из ссылок в стиле автора, правка в артефакте и публикация в соцсети скриптами",
+  "plugins": [
+    {
+      "name": "redakciya",
+      "source": "./",
+      "description": "Навык «Редакция» — новости и публикация в соцсети"
+    }
+  ]
 }
