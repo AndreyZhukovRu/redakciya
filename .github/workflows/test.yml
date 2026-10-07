@@ -1,0 +1,27 @@
+name: test
+on: [push, pull_request]
+jobs:
+  test:
+    strategy:
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      PYTHONUTF8: "1"   # кириллица в выводе на Windows (иначе cp1252)
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e "skills/redakciya/engine[test]"
+      - run: python -m pytest skills/redakciya/engine/tests scripts -q
+      - name: privacy
+        shell: bash
+        env:
+          PRIVACY_DENY: ${{ secrets.PRIVACY_DENY }}   # личный список — только секретом, в репозитории его нет
+        run: |
+          if [ -n "$PRIVACY_DENY" ]; then
+            printf '%s\n' "$PRIVACY_DENY" > "$RUNNER_TEMP/deny.txt"
+            export PRIVACY_DENY_FILE="$RUNNER_TEMP/deny.txt"
+          fi
+          python scripts/privacy_check.py .

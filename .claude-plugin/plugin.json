@@ -1,0 +1,19 @@
+{
+  "name": "redakciya",
+  "version": "0.1.0",
+  "description": "Редакция: окно источников, новости в стиле автора, правка в артефакте и публикация в Telegram, MAX, VK, Facebook, Threads, X, YouTube, Дзен и на сайт скриптами — с экономией токенов.",
+  "author": {
+    "name": "AndreyZhukovRu"
+  },
+  "homepage": "https://github.com/AndreyZhukovRu/redakciya",
+  "license": "MIT",
+  "keywords": [
+    "news",
+    "telegram",
+    "vk",
+    "max",
+    "facebook",
+    "threads",
+    "publishing"
+  ]
+}

@@ -1,0 +1,5 @@
+{
+  "name": "redakciya",
+  "owner": {"name": "AndreyZhukovRu"},
+  "plugins": [{"name": "redakciya", "source": "./", "description": "Навык «Редакция» — новости и публикация в соцсети"}]
+}

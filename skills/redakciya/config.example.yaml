@@ -1,0 +1,22 @@
+# Настройки навыка «Редакция». Токенов здесь нет — только пути к файлам с ними (в ~/.config/redakciya).
+author: "Имя Фамилия"
+language: ru
+editor_url: ""                       # адрес вашей «Редакции» — Claude впишет сам после публикации артефакта
+publish_order: [max, vk, fb, yt, vkch, tg, site, dzen, threads, x]   # Telegram после соцсетей
+defaults: [tg, vk, max]              # галочки площадок по умолчанию в «Редакции»
+reverse_order: [vkch]                # куда пакет идёт в обратном порядке
+platforms:
+  tg:      {mode: web, channel: "@my_channel", title_check: "Название канала", premium: false}   # без Premium подпись к альбому до 1024
+  max:     {channel_id: -100000000000, token_file: max_token}
+  vk:      {mode: api, group_id: 100000000, app_id: 0, group_token_file: vk_group_token, user_token_file: vk_user_token}
+  # без своего приложения VK: vk: {mode: web, group_id: 100000000}
+  vkch:    {url: "https://vk.com/im/channels/-100000000"}
+  fb:      {mode: api, page_id: 100000000000000, token_file: fb_page_token}   # только страница, не личный профиль
+  threads: {mode: web, profile: "@my_profile"}
+  x:       {profile: "@my_profile"}
+  yt:      {channel: "@my_channel"}
+  dzen:    {mode: tg_import, channel: "my_channel"}
+  site:    {mode: api, url: "https://example.ru/api/news", key_file: site_key}
+closing:                             # свой финал-блок в конце каждой новости (необязательно)
+  text: "Обсудить новость — в [нашем чате]({{CHAT}})."
+  chat: {tg: "https://t.me/my_chat", max: "https://max.ru/join/xxxx", vk: "https://vk.me/join/xxxx", fb: "https://m.me/j/xxxx"}
