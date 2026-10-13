@@ -17,7 +17,7 @@ def report(batch: str) -> tuple[list[str], int, int]:
             total += 1
             continue
         p = P.load(d)
-        why = publish.SKIP.get(str(p.meta.get("status") or ""))
+        why = publish.skip_reason(p)
         if why:
             lines.append(f"{n:2}. · {slug} — {why}")
             continue

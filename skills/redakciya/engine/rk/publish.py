@@ -85,7 +85,16 @@ class Busy(RuntimeError):
 
 
 # статусы из «Редакции» (rk pull пишет их в шапку post.md): такие новости не выкладываются
-SKIP = {"hidden": "не публикуем", "draft": "не отмечена «готово»", "writing": "ещё пишется"}
+SKIP = {"hidden": "не публикуем", "draft": "не отмечена «готово»", "writing": "ещё пишется",
+        "later": "перенесена на другой день"}
+
+
+def skip_reason(p) -> str | None:
+    why = SKIP.get(str(p.meta.get("status") or ""))
+    day = str(p.meta.get("publish_on") or "")
+    if p.meta.get("status") == "later" and len(day) == 10:
+        why = f"перенесена на {day[8:10]}.{day[5:7]}"
+    return why
 
 
 def run(batch: str, only: list[str] | None, dry: bool, again: bool) -> int:
@@ -105,7 +114,7 @@ def _run(batch: str, bdir, only: list[str] | None, dry: bool, again: bool) -> in
     posts = []
     for s in order_of(batch):
         p = P.load(P.posts_dir() / s)
-        why = SKIP.get(str(p.meta.get("status") or ""))
+        why = skip_reason(p)
         if why:
             _log(bdir, f"· {p.slug}: {why}")
         else:

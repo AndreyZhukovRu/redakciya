@@ -46,12 +46,28 @@
   #hide { color: var(--muted); border-color: var(--line); }
   #hide:hover:not([disabled]) { color: var(--bad); border-color: var(--bad); }
   #hide.back:hover:not([disabled]) { color: var(--accent); border-color: var(--accent); }
+  .later-wrap { position: relative; }
+  #later { color: var(--muted); border-color: var(--line); }
+  #later:hover:not([disabled]), #later[aria-expanded="true"] { color: var(--warn); border-color: var(--warn); }
+  #later[disabled] { opacity: .5; cursor: default; }
+  #later-menu { position: absolute; right: 0; top: calc(100% + 6px); z-index: 20; width: max-content; min-width: 250px;
+    max-width: calc(100vw - 32px); display: flex; flex-direction: column; gap: 2px; padding: 6px;
+    background: var(--sheet); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 10px 28px rgba(0,0,0,.18); }
+  #later-menu button { display: flex; align-items: baseline; justify-content: space-between; gap: 14px; width: 100%;
+    text-align: left; font-weight: 500; padding: 8px 10px; border-radius: 8px; }
+  #later-menu button:hover, #later-menu button:focus-visible { background: var(--hover); }
+  #later-menu button small { font-size: 12.5px; font-weight: 400; color: var(--muted); font-variant-numeric: tabular-nums; }
+  #later-menu button.on { color: var(--warn); }
+  #later-menu button.on small::after { content: ' ✓'; }
+  #later-menu hr { width: 100%; margin: 4px 0; border: 0; border-top: 1px solid var(--line); }
+  #later-menu .back { color: var(--accent); }
   .pill { font-size: 12px; font-weight: 600; padding: 2px 9px; border-radius: 999px; letter-spacing: .02em; white-space: nowrap; }
   .pill.draft, .pill.new { background: var(--accent-soft); color: var(--accent); }
   .pill.ready, .pill.written { background: var(--ok-soft); color: var(--ok); }
   .pill.published { background: var(--hover); color: var(--muted); }
   .pill.writing, .pill.taken { background: var(--warn-soft); color: var(--warn); }
   .pill.hidden, .pill.skipped { background: var(--bad-soft); color: var(--bad); }
+  .pill.later { background: var(--warn-soft); color: var(--warn); }
 
   .layout { flex: 1; min-height: 0; display: grid; grid-template-columns: 290px minmax(0, 1fr); gap: 18px; padding-top: 12px; }
   nav { min-height: 0; overflow: auto; padding-bottom: 16px; }
@@ -65,6 +81,7 @@
   .item .s { display: flex; gap: 6px; align-items: center; }
   .item.is-published .t, .item.is-hidden .t { color: var(--muted); }
   .item.is-hidden .t { text-decoration: line-through; }
+  .item.is-later .t { color: var(--muted); }
 
   .work { min-height: 0; display: flex; flex-direction: column; }
   .tabs { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; }
@@ -138,6 +155,11 @@
   <select id="pick" aria-label="Новость"><option>Загрузка…</option></select>
   <span id="saved" aria-live="polite"></span>
   <button id="hide" type="button" disabled title="Новость уйдёт в раздел «Не публикуем» внизу списка, её можно вернуть">Не публиковать</button>
+  <div class="later-wrap">
+    <button id="later" type="button" disabled aria-haspopup="menu" aria-expanded="false" aria-controls="later-menu"
+      title="Новость не выйдет с этим пакетом — вернётся в пакет выбранного дня">Перенести ▾</button>
+    <div id="later-menu" role="menu" hidden></div>
+  </div>
   <button id="done" type="button" disabled>Готово к публикации</button>
 </header>
 
@@ -206,6 +228,17 @@ https://example.com/lens про старые объективы — коротк
   // без Telegram Premium подпись к альбому — до 1024 знаков (лимит приходит из settings/platforms)
   const tgLim = () => (cur && cur.mediaNote && settings && settings.limits && settings.limits.tg_album) || 4096;
   const shortLen = (f, s) => vlen(s.replace(/\{LINK\}/g, '').trim()) + (s.includes('{LINK}') ? LINK_LEN[f] : 0);
+  const OPEN = (p) => !['published', 'ready', 'hidden', 'later'].includes(p.status);
+
+  // «Перенести»: даты по часам этого компьютера; отсчёт от сегодня, а если пакет на завтра — от даты пакета
+  const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const today = () => ymd(new Date());
+  const addDays = (iso, n) => { const [y, m, d] = iso.split('-').map(Number); return ymd(new Date(y, m - 1, d + n, 12)); };
+  const batchDay = (p) => (/^\d{4}-\d{2}-\d{2}/.exec((p && p.batch) || '') || [''])[0];
+  const dm = (iso) => iso ? `${iso.slice(8, 10)}.${iso.slice(5, 7)}` : '';
+  const wd = (iso) => { const [y, m, d] = iso.split('-').map(Number); return new Date(y, m - 1, d, 12).toLocaleDateString('ru-RU', { weekday: 'short' }); };
+  const whenTxt = (iso) => !iso ? 'на другой день' : iso <= today() ? 'на сегодня' : iso === addDays(today(), 1) ? 'на завтра' : 'на ' + dm(iso);
+  const laterTxt = (iso) => 'перенесено ' + whenTxt(iso) + (iso && iso <= addDays(today(), 1) ? ', ' + dm(iso) : '');
 
   // ---------- источники: тот же разбор, что rk.sources.parse
   const URL_RE = /https?:\/\/[^\s<>"')\]]+/gi;
@@ -300,7 +333,8 @@ https://example.com/lens про старые объективы — коротк
     document.querySelectorAll('.view').forEach((x) => x.classList.toggle('on', x === b));
     const src = b.dataset.v === 'sources';
     $('news-view').hidden = src; $('sources').hidden = !src;
-    for (const id of ['progress', 'pick', 'saved', 'hide', 'done']) $(id).style.visibility = src ? 'hidden' : '';
+    for (const id of ['progress', 'pick', 'saved', 'hide', 'later', 'done']) $(id).style.visibility = src ? 'hidden' : '';
+    if (src) closeLater();
     try { localStorage.setItem('rk-view', b.dataset.v); } catch (e) {}
   }));
 
@@ -386,8 +420,11 @@ https://example.com/lens про старые объективы — коротк
   function setStatus(s) {
     const el = $('status'); el.hidden = false;
     el.className = 'pill ' + (s || 'draft');
-    el.textContent = { draft: 'черновик', ready: 'готово к публикации', published: 'опубликовано', hidden: 'не публикуем', writing: 'пишу' }[s] || 'черновик';
-    $('done').disabled = !db || readOnly || !cur || ['ready', 'published', 'hidden'].includes(s);
+    el.textContent = s === 'later' ? laterTxt(cur && cur.publishOn)
+      : { draft: 'черновик', ready: 'готово к публикации', published: 'опубликовано', hidden: 'не публикуем', writing: 'пишу' }[s] || 'черновик';
+    $('done').disabled = !db || readOnly || !cur || ['ready', 'published', 'hidden', 'later'].includes(s);
+    $('later').disabled = !db || readOnly || !cur || s === 'published';
+    if ($('later').disabled) closeLater();
     const h = $('hide');
     h.disabled = !db || readOnly || !cur || s === 'published';
     h.textContent = s === 'hidden' ? 'Вернуть в работу' : 'Не публиковать';
@@ -439,7 +476,7 @@ https://example.com/lens про старые объективы — коротк
     setStatus('ready');
     $('saved').textContent = 'Отмечено «готово». Когда отметите все — напишите Claude «публикуй».';
     const i = ordered().findIndex((p) => p.slug === cur.slug);
-    const next = ordered().slice(i + 1).find((p) => !['published', 'ready', 'hidden'].includes(p.status));
+    const next = ordered().slice(i + 1).find(OPEN);
     if (next) setTimeout(() => open(next.slug), 700);
   });
   $('hide').addEventListener('click', async () => {
@@ -451,14 +488,63 @@ https://example.com/lens про старые объективы — коротк
     setStatus(back ? 'draft' : 'hidden');
     $('saved').textContent = back ? 'Новость снова в работе' : 'Новость убрана в «Не публикуем» — внизу списка, её можно вернуть';
   });
+  function closeLater() { $('later-menu').hidden = true; $('later').setAttribute('aria-expanded', 'false'); }
+  function openLater() {
+    if (!cur || readOnly) return;
+    const base = [today(), batchDay(cur)].sort().pop();
+    const fromToday = base === today();
+    const opts = [[1, fromToday ? 'На завтра' : 'На день позже'], [2, fromToday ? 'На послезавтра' : 'На два дня позже']];
+    const on = cur.status === 'later' ? cur.publishOn : '';
+    $('later-menu').innerHTML = opts.map(([n, t]) => { const iso = addDays(base, n);
+      return `<button type="button" role="menuitem" data-day="${iso}"${iso === on ? ' class="on"' : ''}>${t}<small>${wd(iso)}, ${dm(iso)}</small></button>`; }).join('')
+      + (cur.status === 'later' ? `<hr><button type="button" role="menuitem" class="back" data-day="">${batchDay(cur) ? 'Вернуть в пакет ' + dm(batchDay(cur)) : 'Вернуть в работу'}</button>` : '');
+    $('later-menu').querySelectorAll('button').forEach((b) => b.addEventListener('click', () => postpone(b.dataset.day)));
+    const m = $('later-menu');
+    m.style.left = ''; m.style.right = ''; m.hidden = false; $('later').setAttribute('aria-expanded', 'true');
+    if (m.getBoundingClientRect().left < 8) { m.style.left = '0'; m.style.right = 'auto'; }  // кнопка у левого края — открываем вправо
+    m.querySelector('button').focus();
+  }
+  $('later').addEventListener('click', () => ($('later-menu').hidden ? openLater() : closeLater()));
+  document.addEventListener('click', (e) => { if (!e.target.closest('.later-wrap')) closeLater(); });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !$('later-menu').hidden) { closeLater(); $('later').focus(); }
+    if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && !$('later-menu').hidden) {
+      const items = [...$('later-menu').querySelectorAll('button')], i = items.indexOf(document.activeElement);
+      const j = i < 0 ? (e.key === 'ArrowDown' ? 0 : items.length - 1) : (i + (e.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length;
+      items[j].focus(); e.preventDefault();
+    }
+  });
+  async function postpone(day) {
+    closeLater();
+    if (!cur || readOnly) return;
+    clearTimeout(timer); clearTimeout(noteTimer);
+    await flush();
+    if (note.value !== (cur.note || '')) await save(null, { note: note.value });
+    const slug = cur.slug;
+    if (day) {
+      await save({ status: 'later', publishOn: day, postponedAt: new Date().toISOString() }, {});
+      cur.status = 'later'; cur.publishOn = day;
+    } else {
+      await save({ status: 'draft', publishOn: null }, {});
+      cur.status = 'draft'; cur.publishOn = null;
+    }
+    setStatus(cur.status); drawList();
+    $('saved').textContent = day ? `${laterTxt(day).replace('перенесено', 'Перенесено')} — в этом пакете не выйдет, вернётся в пакет того дня`
+      : 'Новость снова в своём пакете';
+    if (day) {
+      const next = ordered().find((p) => p.slug !== slug && p.batch && OPEN(p));
+      if (next) setTimeout(() => open(next.slug), 700);
+    }
+  }
   $('reload').addEventListener('click', () => { $('banner').hidden = true; dirty = false; ed.value = (cur && cur[field]) || ''; lastSaved[field] = ed.value; render(); });
 
   function ordered() {
-    const vis = posts.filter((p) => p.status !== 'hidden');
+    const vis = posts.filter((p) => p.status !== 'hidden' && p.status !== 'later');
     const batches = [...new Set(vis.filter((p) => p.batch).map((p) => p.batch))].sort().reverse();
     const out = [];
     for (const b of batches) out.push(...vis.filter((p) => p.batch === b).sort((a, c) => (a.order || 0) - (c.order || 0)));
     out.push(...vis.filter((p) => !p.batch).sort((a, c) => String(c.createdAt).localeCompare(String(a.createdAt))));
+    out.push(...posts.filter((p) => p.status === 'later').sort((a, c) => String(a.publishOn).localeCompare(String(c.publishOn)) || (a.order || 0) - (c.order || 0)));
     out.push(...posts.filter((p) => p.status === 'hidden').sort((a, c) => String(c.hiddenAt || c.createdAt).localeCompare(String(a.hiddenAt || a.createdAt))));
     return out;
   }
@@ -470,20 +556,22 @@ https://example.com/lens про старые объективы — коротк
     }
     const groups = [];
     for (const p of all) {
-      const g = p.status === 'hidden' ? 'Не публикуем' : p.batch ? 'Пакет ' + p.batch : 'Раньше';
+      const g = p.status === 'hidden' ? 'Не публикуем' : p.status === 'later' ? 'Перенесено' : p.batch ? 'Пакет ' + p.batch : 'Раньше';
       if (!groups.length || groups[groups.length - 1].g !== g) groups.push({ g, items: [] });
       groups[groups.length - 1].items.push(p);
     }
     const label = { draft: 'черновик', ready: 'готово', published: 'опубликовано', writing: 'пишу', hidden: 'не публикуем' };
+    const pill = (p) => p.status === 'later' ? whenTxt(p.publishOn) : label[p.status] || 'черновик';
     list.innerHTML = groups.map(({ g, items }) => `<h3>${esc(g)}</h3>` + items.map((p) =>
-      `<button class="item${cur && cur.slug === p.slug ? ' on' : ''}${p.status === 'published' ? ' is-published' : ''}${p.status === 'hidden' ? ' is-hidden' : ''}" data-s="${esc(p.slug)}" type="button">
+      `<button class="item${cur && cur.slug === p.slug ? ' on' : ''}${p.status === 'published' ? ' is-published' : ''}${p.status === 'hidden' ? ' is-hidden' : ''}${p.status === 'later' ? ' is-later' : ''}" data-s="${esc(p.slug)}" type="button">
         <span class="n">${p.order || '·'}</span><span class="t">${esc(p.title || p.slug)}</span>
-        <span class="s"><span class="pill ${esc(p.status || 'draft')}">${label[p.status] || 'черновик'}</span></span></button>`).join('')).join('');
+        <span class="s"><span class="pill ${esc(p.status || 'draft')}">${pill(p)}</span></span></button>`).join('')).join('');
     list.querySelectorAll('.item').forEach((b) => b.addEventListener('click', () => open(b.dataset.s)));
-    pick.innerHTML = all.map((p) => `<option value="${esc(p.slug)}">${p.order ? p.order + '. ' : ''}${esc((p.title || p.slug).slice(0, 70))}</option>`).join('');
+    pick.innerHTML = all.map((p) => `<option value="${esc(p.slug)}">${p.order ? p.order + '. ' : ''}${esc((p.title || p.slug).slice(0, 70))}${p.status === 'later' ? ' → ' + dm(p.publishOn) : ''}</option>`).join('');
     if (cur) pick.value = cur.slug;
-    const b = all.filter((p) => p.batch && p.batch === all[0].batch && p.status !== 'hidden');
-    $('progress').innerHTML = b.length ? `пакет: <b>${b.length}</b> · готово <b>${b.filter((p) => p.status === 'ready').length}</b> · опубликовано <b>${b.filter((p) => p.status === 'published').length}</b>` : '';
+    const b = all.filter((p) => p.batch && p.batch === all[0].batch && p.status !== 'hidden' && p.status !== 'later');
+    const lat = posts.filter((p) => p.batch === all[0].batch && p.status === 'later').length;
+    $('progress').innerHTML = b.length ? `пакет: <b>${b.length}</b> · готово <b>${b.filter((p) => p.status === 'ready').length}</b> · опубликовано <b>${b.filter((p) => p.status === 'published').length}</b>${lat ? ` · перенесено <b>${lat}</b>` : ''}` : '';
   }
   async function open(slug) {
     await flush();
@@ -546,7 +634,7 @@ https://example.com/lens про старые объективы — коротк
       if (cur) { const fresh = posts.find((p) => p.slug === cur.slug); if (fresh) cur = { ...cur, ...fresh, [field]: dirty ? ed.value : fresh[field] }; }
       const all = ordered();
       const keep = cur ? cur.slug : (() => { try { return localStorage.getItem('rk-last'); } catch (e) { return null; } })();
-      const firstOpen = all.find((p) => p.batch && !['published', 'ready', 'hidden'].includes(p.status));
+      const firstOpen = all.find((p) => p.batch && OPEN(p));
       const target = cur ? cur.slug : (firstOpen ? firstOpen.slug : (all.find((p) => p.slug === keep) ? keep : (all[0] && all[0].slug)));
       drawList(); drawSources();
       if (target && (!cur || cur.slug !== target)) open(target);

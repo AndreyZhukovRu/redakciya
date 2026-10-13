@@ -199,3 +199,12 @@ def test_journal_rechecked_right_before_send(ws, tmp_path):
     connectors.make = lambda cfg, k: Parallel(cfg, {"key": k})
     publish.run("B", ["max"], False, False)
     assert ("max", "b", "") not in CALLS
+
+
+def test_later_not_published(ws, tmp_path):
+    f = tmp_path / "posts" / "a" / "post.md"
+    f.write_text(f.read_text(encoding="utf-8").replace("---\nmedia", "---\nstatus: later\npublish_on: '2026-10-14'\nmedia", 1),
+                 encoding="utf-8")
+    assert publish.run("B", ["max"], False, False) == 0
+    assert [c[1] for c in CALLS] == ["b"]
+    assert "· a: перенесена на 14.10" in (tmp_path / "batches" / "B" / "run.log").read_text(encoding="utf-8")

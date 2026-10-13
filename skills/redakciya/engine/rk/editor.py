@@ -32,10 +32,18 @@ def docs(batch: str, assets_file: str | None) -> list[pathlib.Path]:
     out_dir.mkdir(parents=True, exist_ok=True)
     now = dt.datetime.now(dt.timezone.utc)
     slugs = [l.split("\t")[0].strip() for l in (bdir / "order.txt").read_text(encoding="utf-8").splitlines() if l.strip()]
+    carried = moved(batch)
     out = []
     for n, slug in enumerate(slugs, 1):
         d = P.posts_dir() / slug
         if not (d / "post.md").exists():
+            continue
+        if slug in carried:  # перенесена сюда кнопкой: документ уже в «Редакции» с правками и заметкой — только update
+            (out_dir / "moved").mkdir(exist_ok=True)
+            f = out_dir / "moved" / f"{slug}.json"
+            f.write_text(json.dumps({"batch": batch, "order": n, "status": "draft", "publishOn": None}), encoding="utf-8")
+            _set_meta(d, status="draft", publish_on=None)
+            out.append(f)
             continue
         p = P.load(d)
         doc = {"slug": slug, "batch": batch, "order": n, "title": p.title, "body": p.body.strip(),
@@ -62,10 +70,12 @@ def docs(batch: str, assets_file: str | None) -> list[pathlib.Path]:
 
 
 def _set_meta(d: pathlib.Path, **kv) -> None:
+    """Поля шапки post.md; None — убрать поле."""
     raw = (d / "post.md").read_text(encoding="utf-8")
     m = P.HEAD.match(raw)
     meta = (yaml.safe_load(m.group(1)) or {}) if m else {}
     meta.update(kv)
+    meta = {k: v for k, v in meta.items() if v is not None}
     head = "---\n" + yaml.safe_dump(meta, allow_unicode=True, sort_keys=False, default_flow_style=None).strip() + "\n---\n"
     (d / "post.md").write_text(head + (raw[m.end():] if m else raw), encoding="utf-8")
 
@@ -91,12 +101,74 @@ def pull(src: pathlib.Path) -> list[str]:
         if isinstance(doc.get("targets"), list) and doc["targets"] != p.targets:
             _set_meta(d, to=doc["targets"])
             changed.append("площадки")
-        if doc.get("status") and doc["status"] != p.meta.get("status"):
-            _set_meta(d, status=doc["status"])
+        later = doc.get("status") == "later"
+        day = str(doc.get("publishOn") or "") if later else None
+        if doc.get("status") and (doc["status"] != p.meta.get("status") or day != p.meta.get("publish_on")):
+            _set_meta(d, status=doc["status"], publish_on=day)
+        moved_msg = place(slug, doc)
         note = (doc.get("note") or "").strip()
-        lines.append(f"{doc.get('order', '?'):>2}. {slug}: {doc.get('status')}, правил {doc.get('updatedBy')}"
-                     + (f", изменено: {', '.join(changed)}" if changed else "") + (f" | ЗАМЕТКА: {note}" if note else ""))
+        lines.append(f"{doc.get('order', '?'):>2}. {slug}: {doc.get('status')}{f' на {day}' if later else ''}, "
+                     f"правил {doc.get('updatedBy')}"
+                     + (f", изменено: {', '.join(changed)}" if changed else "") + (f" | ЗАМЕТКА: {note}" if note else "")
+                     + (f" {moved_msg}" if moved_msg else ""))
     return lines
+
+
+# «Перенести» в «Редакции»: status=later + publishOn=ГГГГ-ММ-ДД. Строка новости уезжает из order.txt своего пакета
+# в batches/<publishOn>/order.txt, слаг — в moved.txt того пакета. Вернули в работу — строка едет обратно, но только
+# если её перенесла кнопка (moved.txt): ручные переносы не трогаем.
+DAY = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def _rows(batch: str, name: str = "order.txt") -> list[str]:
+    f = config.home() / "batches" / batch / name
+    return [l for l in f.read_text(encoding="utf-8").splitlines() if l.strip()] if f.exists() else []
+
+
+def _put_rows(batch: str, rows: list[str], name: str = "order.txt") -> None:
+    (config.home() / "batches" / batch).mkdir(parents=True, exist_ok=True)
+    (config.home() / "batches" / batch / name).write_text("".join(r + "\n" for r in rows), encoding="utf-8")
+
+
+def _slugs(rows: list[str]) -> list[str]:
+    return [r.split("\t")[0].strip() for r in rows]
+
+
+def moved(batch: str) -> list[str]:
+    return _slugs(_rows(batch, "moved.txt"))
+
+
+def place(slug: str, doc: dict) -> str:
+    batches = config.home() / "batches"
+    src = str(doc.get("batch") or "")
+    if not src or not (batches / src / "order.txt").exists():
+        return ""
+    later = doc.get("status") == "later"
+    day = str(doc.get("publishOn") or "")
+    if later and (not DAY.match(day) or day <= src[:10]):
+        return f"!! перенос на «{day}» не понят — строка осталась в пакете {src}, но новость не выйдет, пока статус «перенесено»"
+    target = day if later else src
+    nxt = sorted(p.name for p in batches.iterdir() if p.is_dir() and DAY.match(p.name) and p.name > src[:10])
+    here = next((b for b in [src, *nxt] if slug in _slugs(_rows(b))), None)
+    if here == target:
+        if later and slug not in moved(target):  # перенесли руками раньше — запомним, чтобы «Вернуть» сработало
+            _put_rows(target, _rows(target, "moved.txt") + [f"{slug}\t{src}"], "moved.txt")
+        return ""
+    if here is None:
+        return f"!! нет в order.txt ни пакета {src}, ни следующих — перенос не сделан" if later else ""
+    if not later and slug not in moved(here):
+        return ""
+    rows = _rows(here)
+    row = next(r for r in rows if r.split("\t")[0].strip() == slug)
+    _put_rows(here, [r for r in rows if r is not row])
+    if slug in moved(here):
+        _put_rows(here, [r for r in _rows(here, "moved.txt") if r.split("\t")[0].strip() != slug], "moved.txt")
+    if slug not in _slugs(_rows(target)):
+        _put_rows(target, _rows(target) + [row])
+    if later:
+        _put_rows(target, _rows(target, "moved.txt") + [f"{slug}\t{src}"], "moved.txt")
+        return f"→ перенесена на {day[8:10]}.{day[5:7]} (batches/{day})"
+    return f"← возвращена в пакет {src}"
 
 
 def sheets(batch: str) -> list[pathlib.Path]:
