@@ -208,3 +208,46 @@ def test_later_not_published(ws, tmp_path):
     assert publish.run("B", ["max"], False, False) == 0
     assert [c[1] for c in CALLS] == ["b"]
     assert "· a: перенесена на 14.10" in (tmp_path / "batches" / "B" / "run.log").read_text(encoding="utf-8")
+
+
+def test_halt_moves_rest_of_batch_to_fallback(ws, tmp_path):
+    """Площадка остановилась на новости a (VK: фото не встало за 3 попытки) — a и b уходят запасным путём, без повторов."""
+    from rk.connectors.base import Halt
+
+    class Alt(Fake):
+        pass
+
+    class Api(Fake):
+        down = False
+
+        def publish(self, p, dry, page=None, site_link=""):
+            CALLS.append(("api", p.slug, ""))
+            Api.down, self.halted = True, True
+            raise Halt("API-загрузка отключена")
+
+        def fallback(self):
+            return (Alt(self.cfg, {"key": self.key}), "API отключено") if Api.down else None
+    connectors.make = lambda cfg, k: Api(cfg, {"key": k})
+    assert publish.run("B", ["max"], False, False) == 0
+    assert [c[:2] for c in CALLS] == [("api", "a"), ("max", "a"), ("max", "b")]
+    assert journal.has(tmp_path / "posts" / "b", "max")
+    CALLS.clear()                                          # следующий прогон сразу идёт запасным путём
+    (tmp_path / "posts" / "a" / "published.json").unlink()
+    publish.run("B", ["max"], False, False)
+    assert [c[:2] for c in CALLS] == [("max", "a")]
+    assert "запасным путём" in (tmp_path / "batches" / "B" / "run.log").read_text(encoding="utf-8")
+
+
+def test_halt_without_fallback_reports_rest(ws, tmp_path):
+    from rk.connectors.base import Halt
+
+    class Api(Fake):
+        def publish(self, p, dry, page=None, site_link=""):
+            CALLS.append(("api", p.slug, ""))
+            self.halted = True
+            raise Halt("отключено")
+    connectors.make = lambda cfg, k: Api(cfg, {"key": k})
+    assert publish.run("B", ["max"], False, False) == 1
+    assert [c[:2] for c in CALLS] == [("api", "a")]          # b не трогаем — повторы и есть флуд
+    log = (tmp_path / "batches" / "B" / "run.log").read_text(encoding="utf-8")
+    assert "не вышло 2" in log and "--only max" in log

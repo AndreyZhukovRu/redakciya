@@ -36,6 +36,17 @@ STATE_JS = """() => {
 }"""
 
 
+def click_send(btn) -> None:
+    """«Отправить»/«Сохранить» мимо кнопки ИИ-редактора. 14.10.2026 в Web K появилась .chat-input-ai-editor-button
+    (40×40): когда в поле есть текст, она лежит поверх центра кнопки отправки, и обычный click() 30 с ждёт и падает —
+    так не ушёл ни один пост пакета. У левого края кнопки (6 px) ИИ-кнопки нет — сверено elementFromPoint."""
+    box = btn.bounding_box(timeout=15000)
+    if not box:  # кнопки не видно — пусть обычный клик скажет, что не так
+        btn.click(timeout=15000)
+        return
+    btn.click(position={"x": 6, "y": box["height"] / 2}, timeout=15000)
+
+
 def chat_ok(header: str, expected: str) -> bool:
     return bool(header.strip()) and expected.lower() in header.lower()
 
@@ -176,7 +187,7 @@ class TelegramWeb(Connector):
                 page.keyboard.press("Backspace")
             return Result(url="", note=f"готово к отправке: {note}")
         self.sending()
-        page.locator(send).first.click()
+        click_send(page.locator(send).first)
         end = time.time() + 180
         while time.time() < end:
             page.wait_for_timeout(5000)

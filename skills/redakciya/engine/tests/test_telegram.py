@@ -98,3 +98,13 @@ def test_check_reads_public_feed_title(monkeypatch):
     tw.opts["title_check"] = "Другое"
     with pytest.raises(Fail, match="не совпало"):
         tw.check()
+
+
+def test_click_send_misses_ai_button():
+    """14.10.2026: кнопка ИИ-редактора Web K лежит поверх центра «Отправить» — жмём у левого края."""
+    from fakepage import FakePage
+    from rk.connectors.telegram_web import click_send
+    page = FakePage(counts={".chat-input .btn-send": 1})
+    click_send(page.locator(".chat-input .btn-send"))
+    at = [e for e in page.log if e[0] == "click_at"]
+    assert at and at[0][2]["x"] <= 8 and at[0][2]["y"] == 20

@@ -6,15 +6,35 @@
 from __future__ import annotations
 
 import re
+import time
 import urllib.parse
 
 import httpx
 
 from rk import config, media, render
-from rk.connectors.base import Connector, Fail, Result
+from rk.connectors.base import Connector, Fail, Halt, Result
 from rk.connectors.telegram_web import media_of
 
 V = "5.199"
+TRIES = 3            # попыток на одно фото: 12.10.2026 у автора 5–12 повторов на фото в десятках постов VK счёл флудом —
+                     # загрузка по API встала совсем (адрес-заглушка), а браузер в том же аккаунте работал
+DOWN_TTL = 3 * 3600  # столько после сбоя API-загрузку не трогать вовсе — не провоцировать блокировку
+SLEEP = time.sleep
+
+
+def down_file():
+    return config.home() / ".vk_api_down"
+
+
+def upload_down() -> str | None:
+    """Отметка «API-загрузка фото VK лежит» (время и причина), если ей меньше DOWN_TTL."""
+    f = down_file()
+    try:
+        if time.time() - f.stat().st_mtime < DOWN_TTL:
+            return f.read_text(encoding="utf-8").strip() or "без подробностей"
+    except OSError:
+        pass
+    return None
 
 
 def auth_url(app_id: int) -> str:
@@ -76,6 +96,13 @@ class VkApi(Connector):
         name = (g.get("groups") or g)[0].get("name") if isinstance(g, (list, dict)) else "?"
         return f"группа «{name}», токены живы"
 
+    def fallback(self):
+        why = upload_down()
+        if not why or self.opts.get("fallback", "web") != "web":
+            return None
+        from rk.connectors.vk_web import VkWall
+        return VkWall(self.cfg, {**self.opts, "mode": "web"}), f"API-загрузка фото VK отключена ({why})"
+
     def _upload(self, c: httpx.Client, url: str, field: str, path) -> dict:
         with open(path, "rb") as f:
             return c.post(url, files={field: (path.name, f)}, timeout=1800).json()
@@ -85,6 +112,9 @@ class VkApi(Connector):
         files = media_of(p)
         if dry:
             return Result(url="", note=f"готово к отправке: {len(text)} зн., медиа {len(files)}")
+        if why := upload_down():
+            self.halted = True
+            raise Halt(f"API-загрузка фото VK отключена ({why})")
         gid, title = self._gid(), p.title
         desc = "\n\n".join(text.split("\n\n")[:2])
         atts = []
@@ -97,8 +127,10 @@ class VkApi(Connector):
                     atts.append(f"video-{gid}_{up.get('video_id', s['video_id'])}")
                     continue
                 ph = None
-                for attempt in range(5):  # VK иногда отдаёт пустой photo — повтор, с 4-й попытки копия 1600 px
-                    src = media.shrink(m, 1, 1600) if attempt >= 3 else m
+                for attempt in range(TRIES):  # VK иногда отдаёт пустой photo — повтор, последняя попытка копией 1600 px
+                    src = media.shrink(m, 1, 1600) if attempt == TRIES - 1 else m
+                    if attempt:
+                        SLEEP(3 + attempt * 2)  # без паузы VK подряд отдаёт пустой photo
                     try:
                         s = self._api(c, "photos.getWallUploadServer", user, group_id=gid)
                         up = self._upload(c, s["upload_url"], "photo", src)
@@ -109,8 +141,13 @@ class VkApi(Connector):
                         break
                     except (Fail, ValueError, KeyError) as e:
                         print(f"  vk: {m.name}: попытка {attempt + 1}: {e}")
-                if not ph:  # пост без фото — не то, что автор видел в «Редакции»; до wall.post повтор безопасен
-                    raise Fail(f"VK не принял фото {m.name} за 5 попыток — пост не опубликован")
+                if not ph:  # пост без фото — не то, что автор видел в «Редакции»; до wall.post ничего не вышло
+                    down_file().parent.mkdir(parents=True, exist_ok=True)
+                    down_file().write_text(f"{time.strftime('%d.%m %H:%M')}: {m.name} не загрузилось за {TRIES} попытки",
+                                           encoding="utf-8")
+                    self.halted = True
+                    raise Halt(f"VK не принял фото {m.name} за {TRIES} попытки — пост не опубликован, "
+                               f"API-загрузка отключена на {DOWN_TTL // 3600} ч")
                 atts.append(f"photo{ph[0]['owner_id']}_{ph[0]['id']}")
             self.sending()
             r = self._api(c, "wall.post", group, owner_id=-gid, from_group=1, message=text, attachments=",".join(atts))

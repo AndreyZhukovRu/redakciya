@@ -17,7 +17,7 @@ from rk import browser, config, render
 from rk import post as P
 from rk.cli import register
 from rk.connectors.base import Fail
-from rk.connectors.telegram_web import SEL, href_fix
+from rk.connectors.telegram_web import SEL, click_send, href_fix
 
 
 def links_from_embed(s: str) -> tuple[list[tuple[str, str]], int]:
@@ -98,7 +98,7 @@ def edit(page, channel: str, pid: int, p, chat: str, dry: bool) -> str:
     if dry:
         page.keyboard.press("Escape")
         return f"проверка: {st['len']} зн., ссылок {st['a']} из {len(links)}"
-    page.locator(".chat-input .btn-send").first.click()
+    click_send(page.locator(".chat-input .btn-send").first)  # мимо кнопки ИИ-редактора (14.10.2026)
     end = time.time() + 60
     got: list = []
     while time.time() < end:

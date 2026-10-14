@@ -10,6 +10,11 @@ class Fail(RuntimeError):
     pass
 
 
+class Halt(Fail):
+    """Площадка сама остановилась (сервис сбоит, повторы опасны): пакет на ней дальше не идёт —
+    остальные новости уходят запасным путём площадки (fallback), если он есть."""
+
+
 @dataclass
 class Result:
     url: str
@@ -22,6 +27,7 @@ class Connector:
     uses_browser = False       # работает через профиль Chrome публикатора
     retry_safe = True          # можно ли сразу повторить после Fail (до нажатия «опубликовать»)
     login_urls: list[str] = []
+    halted = False             # после Halt: на этой площадке новостей пакета больше не трогать
 
     def __init__(self, cfg, opts: dict):
         self.cfg, self.opts = cfg, opts
@@ -43,6 +49,10 @@ class Connector:
 
     def check(self) -> str:
         return "настроено"
+
+    def fallback(self) -> tuple["Connector", str] | None:
+        """Запасной путь, если основной сейчас выключен: (площадка, почему). None — запасного нет или не нужен."""
+        return None
 
     def login_probe(self) -> tuple[str, str] | None:
         """Для браузерных площадок: (адрес, селектор), который виден только после входа. rk check ждёт его."""

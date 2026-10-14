@@ -10,6 +10,7 @@ platforms:
   max:     {channel_id: -100000000000, token_file: max_token}
   vk:      {mode: api, group_id: 100000000, app_id: 0, group_token_file: vk_group_token, user_token_file: vk_user_token}
   # без своего приложения VK: vk: {mode: web, group_id: 100000000}
+  # VK трижды не принял фото по API → 3 ч через браузер (вход: rk login vk); не нужно — добавьте в vk: fallback: none
   vkch:    {url: "https://vk.com/im/channels/-100000000"}
   fb:      {mode: api, page_id: 100000000000000, token_file: fb_page_token}   # только страница, не личный профиль
   threads: {mode: web, profile: "@my_profile"}

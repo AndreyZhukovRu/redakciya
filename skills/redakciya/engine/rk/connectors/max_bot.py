@@ -53,12 +53,14 @@ class MaxBot(Connector):
         raise Fail("MAX: вложение так и не обработалось")
 
     def publish(self, p, dry: bool, page=None, site_link: str = "") -> Result:
-        text = render.html(p.body, self.cfg.chat_link("max"))
+        chat = self.cfg.chat_link("max")
+        text, cut = render.fit_max(render.html(p.body, chat), chat)
         if len(text) > render.LIMITS["max"]:
-            raise Fail(f"MAX {len(text)} из {render.LIMITS['max']} (считается сырой HTML) — сократите текст")
+            raise Fail(f"MAX {len(text)} из {render.LIMITS['max']} даже без адресов ссылок (считается сырой HTML) — сократите текст")
         files = media_of(p)
         if dry:
-            return Result(url="", note=f"готово к отправке: {len(text)} зн. HTML, медиа {len(files)}")
+            return Result(url="", note=f"готово к отправке: {len(text)} зн. HTML, медиа {len(files)}"
+                                       + (f"; под лимит сняты адреса у {cut} ссылок с конца" if cut else ""))
         h, atts = self._headers(), []
         with httpx.Client(base_url=self.opts.get("api", API), timeout=600) as c:
             for m in files:

@@ -9,7 +9,7 @@ import time
 from rk import config, connectors, journal
 from rk import post as P
 from rk.cli import register
-from rk.connectors.base import Fail
+from rk.connectors.base import Fail, Halt
 
 
 def site_link(d) -> str:
@@ -121,26 +121,45 @@ def _run(batch: str, bdir, only: list[str] | None, dry: bool, again: bool) -> in
             posts.append(p)
     for key in [k for k in cfg.publish_order if k in cfg.platforms and (not only or k in only)]:
         conn = connectors.make(cfg, key)
+        if alt := conn.fallback():  # основной путь выключен ещё с прошлого прогона
+            _log(bdir, f"… {key}: {alt[1]} — выкладываю запасным путём")
+            conn = alt[0]
         seq = list(reversed(posts)) if key in cfg.reverse_order else posts
-        todo = [p for p in seq if key in (p.targets if p.targets is not None else cfg.defaults)
-                and (dry or again or not journal.has(p.dir, key))]
-        if not todo:
-            continue
-        retry = getattr(conn, "retry_safe", True)
-        try:
-            ctx = contextlib.nullcontext(None)
-            if conn.uses_browser:  # и для --dry: форма заполняется в настоящем браузере
-                from rk import browser
-                ctx = browser.session()
-            with ctx as bctx:
-                for p in todo:
-                    if not dry and not again and journal.has(p.dir, key):  # могло выйти, пока шли другие
-                        continue
-                    rc |= _one(bdir, conn, key, p, bctx, dry, retry)
-        except Exception as e:  # noqa: BLE001  (браузер не открылся — пропускаем площадку, пакет идёт дальше)
-            rc = 1
-            _log(bdir, f"✗ {key}: {str(e).splitlines()[0] if str(e) else e.__class__.__name__}")
+        todo = [p for p in seq if key in (p.targets if p.targets is not None else cfg.defaults)]
+        rc |= _platform(bdir, conn, key, todo, dry, again)
+        if conn.halted:  # основной путь выключился посреди пакета
+            left = [p for p in todo if dry or not journal.has(p.dir, key)]
+            if left and (alt := conn.fallback()):
+                _log(bdir, f"… {key}: {alt[1]} — остальные {len(left)} через запасной путь")
+                rc |= _platform(bdir, alt[0], key, left, dry, again)
+            elif left:
+                rc = 1
+                _log(bdir, f"✗ {key}: площадка остановлена, не вышло {len(left)} — повторите позже: "
+                           f"rk publish {batch} --only {key}")
     _log(bdir, f"=== ВСЁ {time.strftime('%H:%M:%S')}")
+    return rc
+
+
+def _platform(bdir, conn, key: str, seq: list, dry: bool, again: bool) -> int:
+    todo = [p for p in seq if dry or again or not journal.has(p.dir, key)]
+    if not todo:
+        return 0
+    rc, retry = 0, getattr(conn, "retry_safe", True)
+    try:
+        ctx = contextlib.nullcontext(None)
+        if conn.uses_browser:  # и для --dry: форма заполняется в настоящем браузере
+            from rk import browser
+            ctx = browser.session()
+        with ctx as bctx:
+            for p in todo:
+                if not dry and not again and journal.has(p.dir, key):  # могло выйти, пока шли другие
+                    continue
+                rc |= _one(bdir, conn, key, p, bctx, dry, retry)
+                if conn.halted:
+                    break
+    except Exception as e:  # noqa: BLE001  (браузер не открылся — пропускаем площадку, пакет идёт дальше)
+        rc = 1
+        _log(bdir, f"✗ {key}: {str(e).splitlines()[0] if str(e) else e.__class__.__name__}")
     return rc
 
 
@@ -165,6 +184,9 @@ def _one(bdir, conn, key: str, p, bctx, dry: bool, retry: bool) -> int:
             journal.put(p.dir, key, res.url, res.note)
             _log(bdir, f"{'⚠' if res.note else '✓'} {p.slug} {key}: {res.url}" + (f" — {res.note}" if res.note else ""))
             return 1 if res.note else 0
+        except Halt as e:  # до отправки дело не дошло; о хвосте пакета решает _run
+            _log(bdir, f"… {p.slug} {key}: {e}")
+            return 0
         except Fail as e:
             _shot(page, p, key)
             if sent:

@@ -21,6 +21,15 @@ class Loc:
 
     def click(self, **kw) -> None:
         self.page.log.append(("click", self.sel))
+        if "position" in kw:
+            self.page.log.append(("click_at", self.sel, kw["position"]))
+
+    def set_input_files(self, files, **kw) -> None:
+        self.page.log.append(("files", files))
+        self.page.uploaded.append(files)
+
+    def bounding_box(self, timeout=None) -> dict:
+        return {"x": 0, "y": 0, "width": 40, "height": 40}
 
     def scroll_into_view_if_needed(self) -> None:
         pass
@@ -40,7 +49,7 @@ class Keyboard:
 
 class FakePage:
     def __init__(self, counts=None, texts=None, evaluate=None):
-        self.counts, self.texts, self.log = dict(counts or {}), dict(texts or {}), []
+        self.counts, self.texts, self.log, self.uploaded = dict(counts or {}), dict(texts or {}), [], []
         self._eval = evaluate or (lambda js, arg: None)
         self.keyboard = Keyboard(self)
 

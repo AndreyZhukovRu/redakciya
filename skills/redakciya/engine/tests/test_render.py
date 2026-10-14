@@ -52,3 +52,19 @@ def test_check_limits_premium(tmp_path):
         (tmp_path / "config.yaml").write_text(f"platforms: {plat}\n", encoding="utf-8")
         probs = render.check_limits(post.load(d), config.load(tmp_path / "config.yaml"))
         assert any("1024" in s for s in probs) == bad      # без Premium подпись к альбому — до 1024
+
+
+def test_fit_max_strips_links_from_end_keeps_chat_and_final():
+    chat = "https://max.ru/join/c"
+    body = ("З\n\n" + "я" * 3880 + " [раз](https://a.ru/1111111111) и [два](https://b.ru/2222222222)"
+            "\n\nПромо [скидка](https://shop.ru/promo), обсудить [в чате]({{CHAT}}).")
+    text, cut = render.fit_max(render.html(body, chat), chat)
+    assert len(text) <= render.LIMITS["max"] and cut >= 1
+    assert "https://b.ru" not in text and "два" in text        # снят с конца тела, текст ссылки остался
+    assert f'<a href="{chat}">' in text                          # чат не трогаем
+    assert "https://shop.ru/promo" in text                       # финал — в последнюю очередь
+
+
+def test_fit_max_untouched_when_short():
+    t = render.html("З\n\n[раз](https://a.ru)", "https://max.ru/join/c")
+    assert render.fit_max(t, "https://max.ru/join/c") == (t, 0)

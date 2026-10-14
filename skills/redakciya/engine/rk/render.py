@@ -49,6 +49,25 @@ def short(text: str, link: str) -> str:
     return text.replace("{LINK}", link).strip()
 
 
+A_TAG = re.compile(r'<a href="([^"]*)">(.*?)</a>', re.S)
+
+
+def fit_max(text: str, chat: str, limit: int = LIMITS["max"]) -> tuple[str, int]:
+    """MAX считает 4000 по сырому HTML вместе с адресами ссылок. Не влезает — с конца снимаем адреса у обычных ссылок
+    (текст остаётся): сначала в теле, потом и в последнем абзаце (финал); ссылку на чат не трогаем никогда.
+    13.10.2026: после правок автора три поста вышли за 4000 — раньше это сокращали руками перед выкладкой."""
+    chat, cut = _html.escape(chat), 0
+    for keep_final in (True, False):
+        for m in reversed(list(A_TAG.finditer(text))):
+            if len(text) <= limit:
+                return text, cut
+            final = text.rfind("\n\n")
+            if m.group(1) == chat or (keep_final and 0 <= final < m.start()):
+                continue
+            text, cut = text[:m.start()] + m.group(2) + text[m.end():], cut + 1
+    return text, cut
+
+
 def check_limits(p, cfg) -> list[str]:
     out = []
     plats = cfg.platforms
@@ -59,8 +78,8 @@ def check_limits(p, cfg) -> list[str]:
         if (n := visible_len(html(p.body, cfg.chat_link("tg")), True)) > lim:
             out.append(f"Telegram {n} из {lim}" + ("" if lim == LIMITS["tg"] or tg.get("mode") == "bot" else
                        " — без Premium подпись к альбому до 1024; есть Premium — platforms.tg.premium: true"))
-    if "max" in plats and (n := len(html(p.body, cfg.chat_link("max")))) > LIMITS["max"]:
-        out.append(f"MAX {n} из {LIMITS['max']} (MAX считает сырой HTML)")
+    if "max" in plats and (n := len(fit_max(html(p.body, cfg.chat_link("max")), cfg.chat_link("max"))[0])) > LIMITS["max"]:
+        out.append(f"MAX {n} из {LIMITS['max']} даже без адресов ссылок (MAX считает сырой HTML)")
     for name, link_len in (("threads", 27), ("x", 23)):
         f = p.dir / f"{name}.txt"
         if name in plats and f.exists():

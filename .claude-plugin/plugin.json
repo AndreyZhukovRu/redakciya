@@ -1,6 +1,6 @@
 {
   "name": "redakciya",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Редакция: окно источников, новости в стиле автора, правка в артефакте и публикация в Telegram, MAX, VK, Facebook, Threads, X, YouTube, Дзен и на сайт скриптами — с экономией токенов.",
   "author": {
     "name": "AndreyZhukovRu"

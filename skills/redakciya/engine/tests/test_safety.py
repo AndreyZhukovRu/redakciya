@@ -100,9 +100,43 @@ def test_vk_api_photo_lost_fails_before_wall_post(tmp_path, monkeypatch):
     monkeypatch.setattr(vk, "_tokens", lambda c: ("U", "G"))
     monkeypatch.setattr(vk, "_api", lambda c, m, tok, **kw: calls.append(m) or {"upload_url": "u"})
     monkeypatch.setattr(vk, "_upload", lambda c, url, field, path: {"photo": "[]"})
+    from rk.connectors import vk_api
+    monkeypatch.setattr(vk_api, "SLEEP", lambda s: None)
     with pytest.raises(Fail, match="a.jpg"):
         vk.publish(post.load(d), dry=False)
     assert "wall.post" not in calls
+    assert calls.count("photos.getWallUploadServer") == vk_api.TRIES == 3   # не сотни повторов (12.10.2026)
+
+
+def test_vk_api_breaker_then_browser_fallback(tmp_path, monkeypatch):
+    """Фото не встало за 3 попытки → отметка на 3 ч: API-загрузку не трогаем, запасной путь — стена через браузер."""
+    cfg, d = ws(tmp_path, monkeypatch, plats="{vk: {mode: api, group_id: 5}}", media_="[a.jpg]")
+    Image.new("RGB", (40, 30), "red").save(d / "a.jpg")
+    from rk.connectors import vk_api
+    from rk.connectors.base import Halt
+    from rk.connectors.vk_web import VkWall
+    monkeypatch.setattr(vk_api, "SLEEP", lambda s: None)
+    vk = make(cfg, "vk")
+    assert vk.fallback() is None                      # пока API живо — запасной путь не нужен
+    monkeypatch.setattr(vk, "_tokens", lambda c: ("U", "G"))
+    monkeypatch.setattr(vk, "_api", lambda c, m, tok, **kw: {"upload_url": "u"})
+    monkeypatch.setattr(vk, "_upload", lambda c, url, field, path: {"photo": "[]"})
+    with pytest.raises(Halt):
+        vk.publish(post.load(d), dry=False)
+    assert vk.halted and vk_api.upload_down()
+    again = make(cfg, "vk")
+    monkeypatch.setattr(again, "_upload", lambda *a: pytest.fail("API-загрузку при выключателе трогать нельзя"))
+    with pytest.raises(Halt, match="отключена"):
+        again.publish(post.load(d), dry=False)
+    alt, why = again.fallback()
+    assert isinstance(alt, VkWall) and alt.opts["group_id"] == 5 and "отключена" in why
+
+
+def test_vk_api_no_fallback_when_disabled(tmp_path, monkeypatch):
+    cfg, d = ws(tmp_path, monkeypatch, plats="{vk: {mode: api, group_id: 5, fallback: none}}")
+    from rk.connectors import vk_api
+    vk_api.down_file().write_text("тест", encoding="utf-8")
+    assert make(cfg, "vk").fallback() is None
 
 
 def test_mixed_album_keeps_order_and_adds_audio(tmp_path, monkeypatch):
